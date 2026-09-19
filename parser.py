@@ -1,6 +1,10 @@
 """File reading and row cleaning/validation."""
 
+import math
 import os
+from datetime import datetime
+
+from models import Transaction
 
 DATA_DIR = "data"
 SAMPLE_PATH = os.path.join(DATA_DIR, "statement.txt")
@@ -31,3 +35,67 @@ def generate_sample_file(path=SAMPLE_PATH):
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(SAMPLE_LINES) + "\n")
     return path
+
+
+def normalise_date(text):
+    """Return a date as YYYY-MM-DD, accepting '/' or '-' separators."""
+    cleaned = text.strip().replace("/", "-")
+    try:
+        return datetime.strptime(cleaned, "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"invalid date '{text.strip()}'")
+
+
+def parse_row(line):
+    """Turn one raw line into a Transaction, or raise ValueError with the reason."""
+    fields = [part.strip() for part in line.split(",")]
+    if len(fields) < 4:
+        raise ValueError("not enough fields")
+    if len(fields) > 4:
+        raise ValueError("too many fields")
+
+    date_text, description, amount_text, category = fields
+
+    date = normalise_date(date_text)
+
+    if not description:
+        raise ValueError("empty description")
+    if not category:
+        raise ValueError("empty category")
+
+    try:
+        amount = float(amount_text)
+    except ValueError:
+        raise ValueError(f"amount '{amount_text}' is not a number")
+    if not math.isfinite(amount):
+        raise ValueError(f"amount '{amount_text}' is not a valid number")
+
+    return Transaction(date, description, amount, category.upper())
+
+
+def load_transactions(path=SAMPLE_PATH):
+    """Return (valid_transactions, rejection_reasons). Never crashes on bad data."""
+    transactions = []
+    rejections = []
+
+    if not os.path.exists(path):
+        return transactions, [f"file not found: {path}"]
+
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError as error:
+        return transactions, [f"could not read file: {error}"]
+
+    if not any(line.strip() for line in lines):
+        return transactions, ["file is empty"]
+
+    for number, line in enumerate(lines, start=1):
+        if not line.strip():
+            continue  # ignore blank lines
+        try:
+            transactions.append(parse_row(line))
+        except ValueError as error:
+            rejections.append(f"row {number}: {error}")
+
+    return transactions, rejections
